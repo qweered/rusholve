@@ -230,7 +230,7 @@ fn lower_simple(cmd: &SimpleCommand, source: &str, opts: &ParserOptions) -> Opti
 
     let span = brush_parser::ast::SourceLocation::location(cmd)
         .as_ref()
-        .map(span_from)
+        .map(|s| span_from(s, source))
         .unwrap_or_else(|| Span::new(0, 0));
 
     // Specialize source/. and alias.
@@ -290,15 +290,10 @@ fn lower_function(
     opts: &ParserOptions,
 ) -> CommandLike {
     let name = fdef.fname.value.clone();
-    let name_span = fdef
-        .fname
-        .loc
-        .as_ref()
-        .map(span_from)
-        .unwrap_or_else(|| Span::new(0, 0));
+    let name_span = span_from_word(&fdef.fname, source);
     let span = brush_parser::ast::SourceLocation::location(fdef)
         .as_ref()
-        .map(span_from)
+        .map(|s| span_from(s, source))
         .unwrap_or(name_span);
 
     let mut body_unit = SourceUnit {
@@ -400,7 +395,7 @@ fn push_assign(
     let value_base = raw_word
         .loc
         .as_ref()
-        .map(|l| l.start.index + name.len() + 1)
+        .map(|l| byte_offset(source, l.start.line, l.start.column) + name.len() + 1)
         .unwrap_or(0);
     let lowered = lower_assignment_value(value_word, value_base, source, opts);
 
@@ -455,11 +450,7 @@ fn record_alias_or_function(cl: &CommandLike, unit: &mut SourceUnit) {
 }
 
 fn lower_word(brush_word: &brush_parser::ast::Word, source: &str, opts: &ParserOptions) -> Word {
-    let span = brush_word
-        .loc
-        .as_ref()
-        .map(span_from)
-        .unwrap_or_else(|| Span::new(0, 0));
+    let span = span_from_word(brush_word, source);
 
     let pieces = match brush_parser::word::parse(&brush_word.value, opts) {
         Ok(brush_pieces) => lower_pieces(&brush_pieces, span.start, source, opts),
@@ -593,8 +584,60 @@ fn compute_static(pieces: &[WordPiece]) -> Option<String> {
     Some(out)
 }
 
-fn span_from(span: &SourceSpan) -> Span {
-    Span::new(span.start.index, span.end.index)
+/// Translate a brush `SourceSpan` into a byte-offset [`Span`] over `source`.
+///
+/// brush_parser 0.4.0 has a bug where `loc.start.index` / `loc.end.index`
+/// are computed as **character counts**, not byte offsets — so any
+/// multi-byte UTF-8 character above a token shifts every subsequent token's
+/// reported index by `byte_len - 1` per char. brush's `line` and `column`
+/// (1-based char counts) *are* correct, so we re-derive byte offsets
+/// from those. Tracking upstream at
+/// <https://github.com/reubeno/brush/issues/1127>; drop this workaround
+/// when the upstream fix lands and we bump `brush-parser`.
+///
+/// brush's `end` line/col is *also* sometimes inconsistent for compound
+/// spans (we've seen `end < start` on multi-line constructs). Clamp the
+/// end up to `start` so [`Span::new`]'s invariant holds; the resulting
+/// zero-width span is a degraded-but-safe diagnostic anchor.
+fn span_from(span: &SourceSpan, source: &str) -> Span {
+    let start = byte_offset(source, span.start.line, span.start.column);
+    let end = byte_offset(source, span.end.line, span.end.column).max(start);
+    Span::new(start, end)
+}
+
+/// Word-specific span helper. Trusts brush's `start` (after coordinate
+/// translation) and recomputes the end as `start + value.len()`, since
+/// `brush_word.value` is reliable and gives an exact byte length even
+/// when brush's `end` is bogus.
+fn span_from_word(brush_word: &brush_parser::ast::Word, source: &str) -> Span {
+    let Some(loc) = brush_word.loc.as_ref() else {
+        return Span::new(0, 0);
+    };
+    let start = byte_offset(source, loc.start.line, loc.start.column);
+    Span::new(start, start + brush_word.value.len())
+}
+
+/// 1-based (line, column) → byte offset. `column` counts UTF-8 chars
+/// (not bytes), matching brush's convention. Returns `source.len()` if
+/// the position is past EOF.
+fn byte_offset(source: &str, line: usize, column: usize) -> usize {
+    if line == 0 || column == 0 {
+        return 0;
+    }
+    let mut cur_line = 1usize;
+    let mut cur_col = 1usize;
+    for (byte_idx, ch) in source.char_indices() {
+        if cur_line == line && cur_col == column {
+            return byte_idx;
+        }
+        if ch == '\n' {
+            cur_line += 1;
+            cur_col = 1;
+        } else {
+            cur_col += 1;
+        }
+    }
+    source.len()
 }
 
 #[cfg(test)]
@@ -863,6 +906,28 @@ mod tests {
             }
         }
         assert!(found, "expected a CommandSub piece");
+    }
+
+    #[test]
+    fn word_spans_survive_multibyte_utf8_above() {
+        // Regression: brush_parser 0.4.0 returns `loc.start.index` as a
+        // char count, so any multi-byte UTF-8 above a token shifts the
+        // reported byte offset. We re-derive byte offsets from
+        // (line, column). Verify a command after a UTF-8-heavy comment
+        // still has a span pointing at the actual command bytes.
+        let src = "# café résumé naïve coöperate\nmv a b\n";
+        let unit = lower(src);
+        let inv = match &unit.commands[0] {
+            CommandLike::Simple(i) => i,
+            other => panic!("expected Simple, got {other:?}"),
+        };
+        let name_word = inv.name().unwrap();
+        let span = name_word.span;
+        assert_eq!(
+            &src[span.start..span.end],
+            "mv",
+            "span must point at `mv`, not at random bytes shifted by UTF-8 above"
+        );
     }
 
     #[test]

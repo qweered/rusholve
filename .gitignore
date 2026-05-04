@@ -6,3 +6,4 @@ result-*
 *.profraw
 .envrc
 .DS_Store
+.claude/
