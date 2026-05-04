@@ -6,6 +6,7 @@ rust-version = "1.88"
 description = "A clean-slate Rust port of resholve: shell-script command-reference resolver/rewriter for Nix"
 license = "MIT"
 repository = "https://github.com/qweered/rusholve"
+readme = "README.md"
 categories = ["command-line-utilities", "development-tools"]
 keywords = ["shell", "bash", "nix", "resolver", "rewriter"]
 

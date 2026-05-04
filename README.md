@@ -1,7 +1,7 @@
 # rusholve
 
 [![ci](https://github.com/qweered/rusholve/actions/workflows/ci.yml/badge.svg)](https://github.com/qweered/rusholve/actions/workflows/ci.yml)
-[![release](https://github.com/qweered/rusholve/actions/workflows/release.yml/badge.svg)](https://github.com/qweered/rusholve/actions/workflows/release.yml)
+[![crates.io](https://img.shields.io/crates/v/rusholve.svg)](https://crates.io/crates/rusholve)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A clean-slate Rust port of [resholve](https://github.com/abathur/resholve): a shell-script command-reference resolver and rewriter for Nix.
@@ -19,15 +19,17 @@ Resholve has long been the standard for resolving shell-command references in ni
 
 ## Install
 
-### From source (cargo)
+### From crates.io
+
+```sh
+cargo install rusholve
+```
+
+### From source
 
 ```sh
 cargo install --git https://github.com/qweered/rusholve --tag v0.0.1
 ```
-
-### Pre-built binaries
-
-Each tagged release ships `tar.gz` archives for `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin` on the [releases page](https://github.com/qweered/rusholve/releases).
 
 ### Nix flake
 
